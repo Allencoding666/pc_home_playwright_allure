@@ -1,0 +1,13 @@
+search_product:
+  - test_info:
+      title: "測試搜尋手機的結果"
+      desc: "進入pchome首頁，關閉廣告視窗，測試搜尋手機的結果"
+      keyword: "手機"
+    test_params:
+      name: "哈哈"
+  - test_info:
+      title: "測試搜尋手沖咖啡組的結果"
+      desc: "進入pchome首頁，關閉廣告視窗，測試搜尋手沖咖啡組的結果"
+      keyword: "手沖咖啡組"
+    test_params:
+      name: "呵呵"

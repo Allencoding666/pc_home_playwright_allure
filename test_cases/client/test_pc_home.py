@@ -1,0 +1,50 @@
+import time
+from datetime import datetime
+
+import allure
+import pytest
+from playwright.sync_api import expect
+
+from helper import get_test_data
+from pages import *
+
+PC_HOME_DATA = get_test_data(test_platform="client", file_name="pc_home")
+SEARCH_PRODUCT_DATA = PC_HOME_DATA["search_product"]
+
+
+@pytest.fixture(scope="class", autouse=True)
+def init_work(request, create_page):
+    request.cls.pc_home = PcHome(create_page)
+
+
+@pytest.mark.usefixtures("init_work")
+class TestPcHome:
+    """測試PChome頁面"""
+
+    pc_home: PcHome
+
+    def test_enter_pc_home(self):
+        """測試進入PChome首頁"""
+
+        allure.dynamic.title("測試進入PChome首頁")
+        allure.dynamic.description("開啟瀏覽器後，是否能正常進入PChome首頁")
+        self.pc_home.go_to_pc_home()
+        self.pc_home.page.cp_screenshot_and_attach(img_name="PChome首頁")
+
+    @pytest.mark.parametrize(
+        "data", SEARCH_PRODUCT_DATA, ids=lambda data: data["test_params"]["name"]
+    )
+    @allure.step("嘎嘎嘎嘎")
+    def test_search_product(self, data):
+        """測試搜尋指定產品產品"""
+
+        allure.dynamic.title(data["test_info"]["title"])
+        allure.dynamic.description(data["test_info"]["desc"])
+        with allure.step("step 01"):
+            self.pc_home.close_pop_up()
+        with allure.step("step 02"):
+            self.pc_home.search_product(keyword=data["test_info"]["keyword"])
+        with allure.step("step 03"):
+            self.pc_home.click_product(product_index="1")
+        with allure.step("step 04"):
+            self.pc_home.page.go_back()

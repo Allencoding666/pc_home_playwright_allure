@@ -1,0 +1,14 @@
+ClientTest00000:
+  - test_pc_home.py
+  - TestPcHome
+  - test_all
+
+ClientTest00001:
+  - test_pc_home.py
+  - TestPcHome
+  - test_enter_pc_home
+
+ClientTest00002:
+  - test_pc_home.py
+  - TestPcHome
+  - test_search_product
