@@ -1,14 +1,16 @@
 ClientTest00000:
-  - test_pc_home.py
-  - TestPcHome
-  - test_all
+  file_name: test_pc_home.py
+  class_name: TestPcHome
+  function_name: test_all
+  desc: "PChome用戶端全部測試"
 
 ClientTest00001:
-  - test_pc_home.py
-  - TestPcHome
-  - test_enter_pc_home
+  file_name: test_pc_home.py
+  class_name: TestPcHome
+  function_name: test_enter_pc_home
+  desc: "PChome用戶端全部測試"
 
 ClientTest00002:
-  - test_pc_home.py
-  - TestPcHome
-  - test_search_product
+  file_name: test_pc_home.py
+  class_name: TestPcHome
+  function_name: test_search_product

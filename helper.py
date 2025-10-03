@@ -21,7 +21,11 @@ class CustomPage(Page):
         os.makedirs("screenshots", exist_ok=True)
 
         if "path" not in kwargs:
-            img_name = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if not img_name else img_name
+            img_name = (
+                datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+                if not img_name
+                else img_name
+            )
             kwargs["path"] = f"screenshots/({self._img_count}){img_name}.png"
         else:
             kwargs["path"] = re.sub(
@@ -33,7 +37,9 @@ class CustomPage(Page):
         return self._page.screenshot(*args, **kwargs)
 
     def cp_screenshot_and_attach(self, img_name=""):
-        img_name = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if not img_name else img_name
+        img_name = (
+            datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if not img_name else img_name
+        )
 
         img = self._page.screenshot()
 
@@ -46,7 +52,7 @@ class CustomPage(Page):
 
 
 def get_test(test_id: str):
-    with open("test_id_list.yaml", "r") as f:
+    with open("test_id_list.yaml", "r", encoding="utf-8") as f:
         test_id_list = yaml.safe_load(f)
 
     test_info = test_id_list.get(test_id)
@@ -79,4 +85,3 @@ def get_test_data(test_platform: str, file_name: str):
             f"Error parsing {ROOT_PATH}/test_data/{test_platform}/{file_name}.yaml: {e}"
         )
         return {}
-

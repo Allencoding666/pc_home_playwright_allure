@@ -1,10 +1,12 @@
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 from datetime import datetime
 from typing import Iterator
 
+import allure
 import pytest
 from playwright.sync_api import sync_playwright, Browser, BrowserContext
 
@@ -67,7 +69,6 @@ def pytest_collection_modifyitems(items):
     讓測試名稱支援中文
     """
 
-    print("pytest_collection_modifyitems")  # TODO
     for item in items:
         item.name = item.name.encode("utf-8").decode("unicode-escape")  # 用例名稱
         item._nodeid = item.nodeid.encode("utf-8").decode("unicode-escape")  # 用例節點
@@ -75,13 +76,14 @@ def pytest_collection_modifyitems(items):
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
-    results_dir = "allure-results"
     report_dir = "report"
+    results_dir = "report/allure_results"
+    report_register = "report/report_register"
     if not os.path.exists(results_dir):
-        print("沒有找到 allure-results，可能是測試沒有產生任何結果")
+        print(f"沒有找到 {results_dir}，可能是測試沒有產生任何結果")
         return
 
-        # 嘗試在不同系統上找 allure 可執行檔
+    # 在不同系統上找 allure 可執行檔
     candidates = [
         shutil.which("allure"),  # Linux / macOS 一般會有
         shutil.which("allure.cmd"),  # Windows (Scoop/Chocolatey)
@@ -93,13 +95,53 @@ def pytest_sessionfinish(session, exitstatus):
         print("找不到 allure CLI，請確認已安裝並設定 PATH")
         return
 
-    print(f"使用 Allure CLI: {allure_path}")
+    print(f"使用 allure CLI: {allure_path}")
 
     try:
-        subprocess.run([
-            allure_path, "generate", "--single-file", results_dir, "--clean", "-o", report_dir
-        ], check=True)
-        print(f"\nAllure single-file report generated at: {os.path.join(report_dir, 'index.html')}")
+        subprocess.run(
+            [
+                allure_path,
+                "generate",
+                "--single-file",
+                results_dir,
+                "--clean",
+                "-o",
+                report_register,
+            ],
+            check=True,
+        )
+        # 重新命名 index.html
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        custom_name = f"report_{now}.html"  # 自訂檔名
+        src = os.path.join(report_register, "index.html")
+        dst = os.path.join(report_dir, custom_name)
+        if os.path.exists(src):
+            os.rename(src, dst)
+            print(f"\nallure single-file report generated at: {dst}")
+        else:
+            print(f"\n找不到 {src}，無法重新命名報告")
     except subprocess.CalledProcessError as e:
         print(f"生成報告失敗: {e}")
         sys.exit(1)
+
+
+@pytest.fixture(autouse=True)
+def setup_suite(request):
+    print(request.node.nodeid)
+
+    # 抓取測試檔案的路徑資訊，看是哪個端口的測試，並設定 Allure 的 parent_suite
+    file_path = Path(request.node.fspath)
+    parent_folder = file_path.parent.name
+    parent_suite_map = {"client": "用戶端測試", "admin": "後台測試", "api": "API 測試"}
+    allure.dynamic.parent_suite(parent_suite_map.get(parent_folder, parent_folder))
+
+    # 抓 class docstring，如果有的話就設定為 suite
+    if hasattr(request.node, "cls") and request.node.cls:
+        class_doc = request.node.cls.__doc__
+        if class_doc:
+            allure.dynamic.suite(class_doc.strip())
+
+    # 抓 function docstring，如果有的話就設定為 sub_suite
+    func_doc = getattr(request.node.function, "__doc__", None)
+    if func_doc:
+        allure.dynamic.sub_suite(func_doc.strip())

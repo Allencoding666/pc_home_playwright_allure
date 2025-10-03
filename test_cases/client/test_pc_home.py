@@ -17,7 +17,6 @@ def init_work(request, create_page):
     request.cls.pc_home = PcHome(create_page)
 
 
-@pytest.mark.usefixtures("init_work")
 class TestPcHome:
     """測試PChome頁面"""
 
@@ -26,7 +25,7 @@ class TestPcHome:
     def test_enter_pc_home(self):
         """測試進入PChome首頁"""
 
-        allure.dynamic.title("測試進入PChome首頁")
+        allure.dynamic.title("進入PChome首頁")
         allure.dynamic.description("開啟瀏覽器後，是否能正常進入PChome首頁")
         self.pc_home.go_to_pc_home()
         self.pc_home.page.cp_screenshot_and_attach(img_name="PChome首頁")
@@ -34,17 +33,16 @@ class TestPcHome:
     @pytest.mark.parametrize(
         "data", SEARCH_PRODUCT_DATA, ids=lambda data: data["test_params"]["name"]
     )
-    @allure.step("嘎嘎嘎嘎")
     def test_search_product(self, data):
         """測試搜尋指定產品產品"""
 
         allure.dynamic.title(data["test_info"]["title"])
         allure.dynamic.description(data["test_info"]["desc"])
-        with allure.step("step 01"):
+        with allure.step("step 01: 關閉跳出視窗"):
             self.pc_home.close_pop_up()
-        with allure.step("step 02"):
+        with allure.step("step 02: 搜尋產品"):
             self.pc_home.search_product(keyword=data["test_info"]["keyword"])
-        with allure.step("step 03"):
+        with allure.step("step 03: 點擊產品"):
             self.pc_home.click_product(product_index="1")
-        with allure.step("step 04"):
+        with allure.step("step 04: 返回上一頁"):
             self.pc_home.page.go_back()
