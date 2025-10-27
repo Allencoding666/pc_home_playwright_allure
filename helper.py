@@ -5,8 +5,6 @@ from datetime import datetime
 import allure
 import yaml
 from playwright.sync_api import Page
-from lxml.html import builder
-from lxml import html
 
 from settings import ROOT_PATH
 

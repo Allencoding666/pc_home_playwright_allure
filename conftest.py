@@ -29,7 +29,7 @@ def create_browser(request) -> Iterator[Browser]:
     """每個測試 class 建立一個獨立的瀏覽器實例"""
 
     with sync_playwright() as p:
-        br = p.chromium.launch(headless=False)
+        br = p.chromium.launch()
         request.cls.br = br
         yield br
         br.close()
