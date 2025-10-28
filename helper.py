@@ -83,3 +83,22 @@ def get_test_data(test_platform: str, file_name: str):
             f"Error parsing {ROOT_PATH}/test_data/{test_platform}/{file_name}.yaml: {e}"
         )
         return {}
+
+
+def build_pytest_test_paths(test_id_list: list[str]) -> list[str]:
+    """
+    根據 test_id 列表建立 pytest 執行參數中的測試路徑部分。
+    例如：['test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home']
+    """
+    test_paths = []
+    for test_id in test_id_list:
+        test_platform, test_info = get_test(test_id)
+        if test_info["function_name"] == "test_all":
+            test_paths.append(
+                f"test_cases/{test_platform}/{test_info['file_name']}::{test_info['class_name']}"
+            )
+        else:
+            test_paths.append(
+                f"test_cases/{test_platform}/{test_info['file_name']}::{test_info['class_name']}::{test_info['function_name']}"
+            )
+    return test_paths

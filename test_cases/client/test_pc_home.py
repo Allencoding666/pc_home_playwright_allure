@@ -29,7 +29,7 @@ class TestPcHome:
         allure.dynamic.description("開啟瀏覽器後，是否能正常進入PChome首頁")
         self.pc_home.go_to_pc_home()
         self.pc_home.page.cp_screenshot_and_attach(img_name="PChome首頁")
-        time.sleep(60)
+        time.sleep(5)
 
     @pytest.mark.parametrize(
         "data", SEARCH_PRODUCT_DATA, ids=lambda data: data["test_params"]["name"]
