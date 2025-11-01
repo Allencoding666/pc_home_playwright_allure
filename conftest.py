@@ -64,11 +64,25 @@ def create_page(request, create_context) -> Iterator[CustomPage]:
     custom_page.close()
 
 
+class ProgressReporter:
+    def __init__(self):
+        self.total_tests = 0
+        self.completed_tests = 0
+
+    def pytest_collection_finish(self, session):
+        self.total_tests = len(session.items)
+
+    def pytest_runtest_teardown(self, item, nextitem):
+        self.completed_tests += 1
+        if self.total_tests > 0:
+            progress = int((self.completed_tests / self.total_tests) * 100)
+            print(f"PROGRESS:{progress}", flush=True)
+
+
 def pytest_collection_modifyitems(items):
     """
     讓測試名稱支援中文
     """
-
     for item in items:
         item.name = item.name.encode("utf-8").decode("unicode-escape")  # 用例名稱
         item._nodeid = item.nodeid.encode("utf-8").decode("unicode-escape")  # 用例節點
@@ -145,3 +159,8 @@ def setup_suite(request):
     func_doc = getattr(request.node.function, "__doc__", None)
     if func_doc:
         allure.dynamic.sub_suite(func_doc.strip())
+
+
+def pytest_configure(config):
+    if not config.pluginmanager.hasplugin("progress_reporter"):
+        config.pluginmanager.register(ProgressReporter(), "progress_reporter")

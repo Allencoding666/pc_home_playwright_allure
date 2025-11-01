@@ -1,9 +1,12 @@
 import asyncio
 import locale
+import os
+import re
 import subprocess
-from typing import List
+from typing import List, Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from pydantic import BaseModel
 
 import helper
 import settings
@@ -12,79 +15,85 @@ import settings
 tests_router = APIRouter()
 
 
-@tests_router.get("/run_tests/")
-async def run_tests(test_ids: str):
-    """API 來觸發多個 pytest 測試"""
-
-    def sync_run(args):
-
-        return subprocess.run(
-            args,
-            capture_output=not settings.DEBUG_MODE,  # 捕獲 stdout 和 stderr
-            text=True,  # 以文字形式回傳而不是 bytes
-            encoding=locale.getpreferredencoding(),  # 取得系統預設編碼
-        )
-
-    test_id_list = test_ids.split(",")
-
-    testing_ids = []
-    for test_id in test_id_list:
-        if test_id in settings.RUNNING_TASKS.keys():
-            testing_ids.append(test_id)
-
-    if testing_ids:
-        return {"message": f"{','.join(testing_ids)} 測試正在進行中"}
-
-    output = {"exit_code": "", "stdout": "", "stderr": ""}
-
-    try:
-        test_args: List[str] = ["pytest", "-vs"]
-        test_args.extend(helper.build_pytest_test_paths(test_id_list))
-
-        loop = asyncio.get_running_loop()
-        process_result = await loop.run_in_executor(None, sync_run, test_args)
-        for test_id in test_id_list:
-            settings.RUNNING_TASKS[test_id] = process_result
-
-        for test_id in test_id_list:
-            settings.RUNNING_TASKS.pop(test_id, None)
-
-        if not settings.DEBUG_MODE:
-            output.update(
-                {
-                    "stdout": process_result.stdout,
-                    "stderr": process_result.stderr,
-                }
-            )
-
-        output.update(
-            {
-                "test_info": test_ids,
-                "exit_code": process_result.returncode,
-            }
-        )
-
-    except Exception as e:
-        output["error"] = str(e)
-
-    return output
+@tests_router.get("/status")
+async def get_all_test_statuses():
+    """獲取所有正在執行的測試任務狀態"""
+    # 改為從新的 BROADCAST_MANAGER 獲取狀態
+    running_tests = list(settings.BROADCAST_MANAGER.keys())
+    return {"running_tests": running_tests}
 
 
-@tests_router.get("/test_status/{test_id}")
-async def task_status(test_id: str):
-    """查詢測試狀態"""
-    if test_id in settings.RUNNING_TASKS.keys():
-        status = "測試中"
+@tests_router.get("/log/{test_id}")
+async def get_test_log(test_id: str):
+    """獲取指定測試的歷史日誌"""
+    log_dir = os.path.join(settings.ROOT_PATH, "logs")
+    # 替換掉檔名中可能引起問題的字元
+    safe_test_id = test_id.replace(",", "_")
+    log_file_path = os.path.join(log_dir, f"{safe_test_id}.log")
+
+    if not os.path.exists(log_file_path):
+        raise HTTPException(status_code=404, detail=f"找不到測試 '{test_id}' 的日誌。")
+
+    with open(log_file_path, "r", encoding="utf-8") as f:
+        log_content = f.read()
+
+    return {"test_id": test_id, "log": log_content}
+
+
+class StopTestPayload(BaseModel):
+    test_ids: str
+
+
+@tests_router.post("/stop")
+async def stop_tests(payload: StopTestPayload):
+    """
+    根據 test_id 停止正在執行的測試。
+    允許多個 test_id，以逗號分隔。
+    """
+    test_id_list = payload.test_ids.split(",")
+    stopped_ids = []
+    not_running_ids = []
+    error_ids = {}
+
+    # 注意：這裡的 payload.test_ids 應該是執行時的組合 ID，例如 "TestID1,TestID2"
+    test_ids_key = payload.test_ids
+    if test_ids_key in settings.BROADCAST_MANAGER:
+        process = settings.BROADCAST_MANAGER[test_ids_key].get("process")
+        if process and process.returncode is None:  # 確保進程仍在執行
+            try:
+                # 終止子進程
+                process.terminate()
+                # run_test_task 中的 finally 區塊會處理後續清理
+                stopped_ids.append(test_ids_key)
+            except Exception as e:
+                error_ids[test_ids_key] = str(e)
+        else:
+            not_running_ids.append(test_ids_key)
     else:
-        status = "非測試中"
+        not_running_ids.extend(test_id_list)
 
-    return {"test_id": test_id, "status": status}
+    return {
+        "message": "停止測試指令已處理完成。",
+        "stopped_ids": stopped_ids,
+        "not_running_ids": not_running_ids,
+        "errors": error_ids,
+    }
 
 
-async def run_test_task(
-    websocket: WebSocket, test_ids: str, test_id_list: List[str], test_args: List[str]
-):
+async def broadcast(test_ids: str, message: dict):
+    """向特定測試的所有監聽者廣播訊息"""
+    if test_ids in settings.BROADCAST_MANAGER:
+        connections: Set[WebSocket] = settings.BROADCAST_MANAGER[test_ids][
+            "connections"
+        ]
+        for connection in connections:
+            await connection.send_json(message)
+
+
+async def run_test_task(test_ids: str, test_id_list: List[str], test_args: List[str]):
     """在背景執行單次測試任務，並透過 WebSocket 回報進度"""
+    log_dir = os.path.join(settings.ROOT_PATH, "logs")
+    os.makedirs(log_dir, exist_ok=True)
     try:
         # 開 subprocess 執行 pytest
         process = await asyncio.create_subprocess_exec(
@@ -95,49 +104,64 @@ async def run_test_task(
 
         # 標記正在執行
         for test_id in test_id_list:
-            settings.RUNNING_TASKS[test_id] = process
+            settings.RUNNING_TASKS[test_id] = (
+                process  # 保留給舊 stop API 的相容性，但建議棄用
+            )
+        settings.BROADCAST_MANAGER[test_ids]["process"] = process
 
         resp = {
             "test_id": test_ids,
             "type": "info",
             "log": f"執行測試: {test_ids}",
         }
-        await websocket.send_json(resp)
+        await broadcast(test_ids, resp)
 
         # 即時讀取 stdout
-        async def stream_output(test_ids, stream, log_type):
-            # 確保 websocket 連線仍然開啟
-            if websocket.client_state == 3:  # DISCONNECTED
-                return
-            async for line in stream:
-                try:
-                    resp = {
+        async def stream_output(stream, log_file):
+            async for raw_line in stream:
+                line = raw_line.decode(
+                    locale.getpreferredencoding(), errors="ignore"
+                ).rstrip()
+                log_file.write(line + "\n")
+                log_file.flush()
+
+                # 檢查是否為進度回報
+                progress_match = re.match(r"^PROGRESS:(\d+)$", line)
+                if progress_match:
+                    percentage = int(progress_match.group(1))
+                    settings.BROADCAST_MANAGER[test_ids]["progress"] = percentage
+                    progress_resp = {
                         "test_id": test_ids,
-                        "type": log_type,
-                        "log": line.decode(
-                            locale.getpreferredencoding(), errors="ignore"
-                        ).rstrip(),
+                        "type": "progress",
+                        "percentage": percentage,
                     }
-                    await websocket.send_json(resp)
-                except WebSocketDisconnect:
-                    print("串流輸出時連線中斷，停止發送。")
-                    break
+                    await broadcast(test_ids, progress_resp)
+                else:
+                    log_resp = {
+                        "test_id": test_ids,
+                        "type": "log",
+                        "log": line,
+                    }
+                    await broadcast(test_ids, log_resp)
 
         # 同時處理 stdout 和 stderr
-        await asyncio.gather(
-            stream_output(test_ids, process.stdout, "log"),
-            stream_output(test_ids, process.stderr, "log"),  # stderr 也視為 log
-        )
+        safe_test_ids = test_ids.replace(",", "_")
+        log_file_path = os.path.join(log_dir, f"{safe_test_ids}.log")
+        with open(log_file_path, "w", encoding="utf-8") as log_f:
+            await asyncio.gather(
+                stream_output(process.stdout, log_f),
+                stream_output(process.stderr, log_f),
+            )
 
         # 等待結束
         exit_code = await process.wait()
-        resp = {
+        end_resp = {
             "test_id": test_ids,
             "type": "info",
             "message": f"{test_ids} 測試結束",
             "log": f"=== {test_ids} 測試結束，exit_code={exit_code} ===",
         }
-        await websocket.send_json(resp)
+        await broadcast(test_ids, end_resp)
 
         # 傳回結果
         test_result = "PASS" if exit_code == 0 else "FAIL"
@@ -147,104 +171,107 @@ async def run_test_task(
             "message": f"{test_ids} 測試完成，結果為[ {test_result} ]，詳細資訊請查看測試即時訊息",
             "log": f"{test_ids} 測試完成，結果為[ {test_result} ]",
         }
-        # 傳送 JSON 字串給前端
-        await websocket.send_json(resp)
+        await broadcast(test_ids, resp)
 
     except Exception as e:
+        print(e)
         resp = {
             "test_id": test_ids,
             "type": "error",
             "message": f"Error: 測試 {test_ids} 執行期間出現錯誤，詳細資訊請查看測試即時訊息",
             "log": f"Error: 測試 {test_ids} 執行期間出現錯誤: {str(e)}",
         }
-        await websocket.send_json(resp)
+        await broadcast(test_ids, resp)
     finally:
-        # 只清理由這個 WebSocket 連線啟動的任務
+        # 關閉所有監聽此任務的 WebSocket 連線
+        if test_ids in settings.BROADCAST_MANAGER:
+            connections = list(
+                settings.BROADCAST_MANAGER[test_ids]["connections"]
+            )  # 複製一份以安全遍歷
+            for connection in connections:
+                if connection.client_state != 3:
+                    await connection.close()
+            settings.BROADCAST_MANAGER.pop(test_ids, None)
+
+        # 清理舊的狀態標記
         for test_id in test_id_list:
             if test_id in settings.RUNNING_TASKS:
                 settings.RUNNING_TASKS.pop(test_id, None)
 
 
-@tests_router.websocket("/ws/run_tests")
-async def ws_run_tests(websocket: WebSocket):
+@tests_router.websocket("/ws/test_manager")
+async def ws_test_manager(websocket: WebSocket):
+    """
+    透過 WebSocket 管理測試任務。
+    接收 JSON 指令來執行或停止測試。
+
+    接收格式:
+    - 執行測試: {"command": "execute_test", "test_id": "TestID1,TestID2"}
+    """
     await websocket.accept()
+    test_ids_to_monitor = None
     try:
-        while True:
-            # 每次請求重置這些變數，確保獨立性
-            test_id_list: List[str] = []
-            # 前端送 test_ids，例如 "ClientTest00001,ClientTest00002"
-            test_ids = await websocket.receive_text()
+        data = await websocket.receive_json()
+        command = data.get("command")
+        test_ids = data.get("test_id")
+
+        if command == "execute_test" and test_ids:
+            test_ids_to_monitor = test_ids
             test_id_list = test_ids.split(",")
 
-            # 檢查是否有測試正在進行
-            testing_ids = [
-                tid for tid in test_id_list if tid in settings.RUNNING_TASKS.keys()
-            ]
-            if testing_ids:
+            # 檢查是否有測試正在進行 (檢查 BROADCAST_MANAGER)
+            if test_ids in settings.BROADCAST_MANAGER:
+                # 測試已在執行，將此新連線加入廣播列表
+                settings.BROADCAST_MANAGER[test_ids]["connections"].add(websocket)
+                current_progress = settings.BROADCAST_MANAGER[test_ids]["progress"]
                 resp = {
                     "test_id": test_ids,
                     "type": "warning",
-                    "message": f"{','.join(testing_ids)} 測試正在進行中，無法重複執行，終止本次測試請求",
+                    "message": f"{test_ids} 測試正在進行中，已為您連接至即時進度。",
+                    "progress": current_progress,
                 }
                 await websocket.send_json(resp)
-                continue  # 繼續等待下一個指令
+            else:
+                # 測試未執行，啟動新測試
+                settings.BROADCAST_MANAGER[test_ids] = {
+                    "connections": {websocket},
+                    "progress": 0,
+                    "process": None,
+                }
 
-            # 準備 pytest 參數
-            test_args: List[str] = ["pytest"]
-            test_args.extend(helper.build_pytest_test_paths(test_id_list))
+                # 準備 pytest 參數
+                test_args: List[str] = [
+                    "pytest",
+                    "-vs",
+                ]  # 加上 -vs 可以在日誌中看到詳細輸出
+                test_args.extend(helper.build_pytest_test_paths(test_id_list))
 
-            # 將測試作為背景任務執行，主迴圈可以繼續接收新訊息
-            asyncio.create_task(
-                run_test_task(websocket, test_ids, test_id_list, test_args)
+                # 將測試作為背景任務執行
+                asyncio.create_task(run_test_task(test_ids, test_id_list, test_args))
+
+            # 讓連線保持開啟，以接收廣播
+            while True:
+                await websocket.receive_text()  # 等待客戶端斷開
+
+        else:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "無效的指令格式，需要 'command':'execute_test' 和 'test_id'。",
+                }
             )
 
     except WebSocketDisconnect:
-        print("客戶端中斷連線，關閉 WebSocket。")
+        print(f"客戶端中斷連線: {websocket.client}")
     finally:
+        # 從廣播列表中移除此連線
+        if test_ids_to_monitor and test_ids_to_monitor in settings.BROADCAST_MANAGER:
+            # 使用 discard 而不是 remove，這樣即使 websocket 不在集合中也不會引發錯誤
+            settings.BROADCAST_MANAGER[test_ids_to_monitor]["connections"].discard(
+                websocket
+            )
+            # 如果這是最後一個連線，可以考慮是否要清理 BROADCAST_MANAGER，但目前邏輯是等測試任務結束才清理
+
         # 確保連線關閉
-        if websocket.client_state != 3:  # WebSocketState.DISCONNECTED
+        if websocket.client_state != 3:
             await websocket.close()
-
-
-@tests_router.websocket("/ws/run_tests/stop_test")
-async def ws_stop_test(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        # 前端送 test_ids，例如 "ClientTest00001,ClientTest00002"
-        test_ids = await websocket.receive_text()
-        test_id_list = test_ids.split(",")
-
-        # 檢查是否有測試正在進行
-        testing_ids = [
-            tid for tid in test_id_list if tid in settings.RUNNING_TASKS.keys()
-        ]
-        if not testing_ids:
-            resp = {
-                "test_id": test_ids,
-                "type": "warning",
-                "log": f"{','.join(testing_ids)} 測試並未在進行中，無法停止該測試",
-            }
-            await websocket.send_json(resp)
-            return
-
-        for test_id in testing_ids:
-            process = settings.RUNNING_TASKS.get(test_id)
-            if process:
-                process.terminate()  # 終止測試進程
-                await websocket.send_json(
-                    {"type": "info", "message": f"已停止測試 {test_id}"}
-                )
-            settings.RUNNING_TASKS.pop(test_id, None)
-
-    except WebSocketDisconnect:
-        print("客戶端中斷連線")
-    except Exception as e:
-        resp = {
-            "test_id": test_ids,
-            "type": "error",
-            "message": f"Error: 停止測試 {test_ids} 時出現錯誤，詳細資訊請查看測試即時訊息",
-            "log": f"Error: 停止測試 {test_ids} 時出現錯誤: {str(e)}",
-        }
-        await websocket.send_json(resp)
-    finally:
-        await websocket.close()
