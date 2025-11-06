@@ -6,7 +6,6 @@ import pytest
 from playwright.sync_api import expect
 
 from helper import get_test_data
-from pages import *
 
 PC_HOME_DATA = get_test_data(test_platform="client", file_name="pc_home")
 SEARCH_PRODUCT_DATA = PC_HOME_DATA["search_product"]
@@ -14,14 +13,16 @@ SEARCH_PRODUCT_DATA = PC_HOME_DATA["search_product"]
 
 @pytest.fixture(scope="class", autouse=True)
 def init_work(request, create_page):
+    from pages import PcHome
+
     request.cls.pc_home = PcHome(create_page)
 
 
 class TestPcHome:
     """測試PChome頁面"""
 
-    pc_home: PcHome
-
+    @pytest.mark.tag(name="ClientTest00001", order=1)
+    @pytest.mark.tag(name="ClientTest00002", order=1)
     def test_enter_pc_home(self):
         """測試進入PChome首頁"""
 
@@ -31,11 +32,12 @@ class TestPcHome:
         self.pc_home.page.cp_screenshot_and_attach(img_name="PChome首頁")
         time.sleep(5)
 
+    @pytest.mark.tag(name="ClientTest00002", order=2)
     @pytest.mark.parametrize(
         "data", SEARCH_PRODUCT_DATA, ids=lambda data: data["test_params"]["name"]
     )
     def test_search_product(self, data):
-        """測試搜尋指定產品產品"""
+        """測試搜尋指定產品"""
 
         allure.dynamic.title(data["test_info"]["title"])
         allure.dynamic.description(data["test_info"]["desc"])

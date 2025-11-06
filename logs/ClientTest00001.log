@@ -1,0 +1,24 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.1, pytest-8.3.4, pluggy-1.6.0 -- C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure
+configfile: pytest.ini
+plugins: allure-pytest-2.15.0, anyio-4.10.0, base-url-2.1.0, playwright-0.7.0
+collecting ... collected 3 items / 2 deselected / 1 selected
+
+test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home ն}lɶ: 2025-11-06 12:20:38
+test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home
+PASSED [100%]Report successfully generated to C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\temp_results\..\ClientTest00001\temp_generate
+PROGRESS:100
+յɶ: 2025-11-06 12:20:45
+ϥ allure CLI: C:\Users\Allen\scoop\shims\allure.CMD
+
+allure single-file report generated at: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\temp_results\..\ClientTest00001\ClientTest00001_20251106_122047.html
+
+
+======================= 1 passed, 2 deselected in 9.22s =======================
+
+start_time: 2025-11-06 12:20:37
+end_time: 2025-11-06 12:20:47
+execution_time: 9.73
+test_result: PASS

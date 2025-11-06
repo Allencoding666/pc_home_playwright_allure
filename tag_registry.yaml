@@ -1,0 +1,10 @@
+ClientTest00001:
+  description: 測試進入PChome首頁
+  paths:
+  - test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home
+ClientTest00002:
+  description: 測試搜尋指定產品
+  paths:
+  - test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home
+  - test_cases/client/test_pc_home.py::TestPcHome::test_search_product[哈哈]
+  - test_cases/client/test_pc_home.py::TestPcHome::test_search_product[呵呵]

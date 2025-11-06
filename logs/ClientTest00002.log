@@ -1,0 +1,30 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.1, pytest-8.3.4, pluggy-1.6.0 -- C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure
+configfile: pytest.ini
+plugins: allure-pytest-2.15.0, anyio-4.10.0, base-url-2.1.0, playwright-0.7.0
+collecting ... collected 3 items
+
+test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home ն}lɶ: 2025-11-05 18:48:29
+test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home
+PASSED [ 33%]PROGRESS:33
+
+test_cases/client/test_pc_home.py::TestPcHome::test_search_product[] test_cases/client/test_pc_home.py::TestPcHome::test_search_product[]
+PASSED [ 66%]PROGRESS:66
+
+test_cases/client/test_pc_home.py::TestPcHome::test_search_product[] test_cases/client/test_pc_home.py::TestPcHome::test_search_product[]
+PASSED [100%]Report successfully generated to C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\temp_results\..\ClientTest00002\temp_generate
+PROGRESS:100
+յɶ: 2025-11-05 18:48:44
+ϥ allure CLI: C:\Users\Allen\scoop\shims\allure.CMD
+
+allure single-file report generated at: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\temp_results\..\ClientTest00002\ClientTest00002_20251105_184846.html
+
+
+============================= 3 passed in 17.16s ==============================
+
+start_time: 2025-11-05 18:48:28
+end_time: 2025-11-05 18:48:46
+execution_time: 17.58
+test_result: PASS
