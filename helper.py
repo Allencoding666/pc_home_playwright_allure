@@ -127,3 +127,35 @@ def update_tag_registry(items):
         # allow_unicode=True 確保中文能正確寫入
         # sort_keys=True 讓輸出的 tag 字母排序，更易讀
         yaml.dump(final_registry, f, allow_unicode=True, sort_keys=True)
+
+
+def get_allure_results_dir(test_id: str) -> str:
+    """
+    根據 test_id 生成一個唯一的 Allure results 目錄路徑。
+    這個目錄會被用來暫存 Allure 的 JSON 結果檔案。
+
+    Args:
+        test_id: 測試任務的 ID。
+
+    Returns:
+        一個唯一的目錄路徑字串。
+    """
+    safe_test_id = test_id.replace(",", "_")
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    return os.path.join(
+        ROOT_PATH, "reports", "temp_results", f"{safe_test_id}_{timestamp}"
+    )
+
+
+class StepCounter:
+    """一個簡單的步驟計數器，用於在 Allure 報告中生成有序的步驟名稱。"""
+
+    def __init__(self):
+        self._count = 0
+
+    def __call__(self, description: str) -> str:
+        """
+        呼叫實例時，計數器加一並回傳格式化的步驟字串。
+        """
+        self._count += 1
+        return f"Step {self._count:02d}: {description}"

@@ -3,3 +3,4 @@ __pycache__/
 allure_results/
 screenshots/
 reports/
+local_reports/

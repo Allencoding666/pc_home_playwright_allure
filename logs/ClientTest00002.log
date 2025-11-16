@@ -4,27 +4,24 @@ cachedir: .pytest_cache
 rootdir: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure
 configfile: pytest.ini
 plugins: allure-pytest-2.15.0, anyio-4.10.0, base-url-2.1.0, playwright-0.7.0
-collecting ... collected 3 items
+collecting ... collected 7 items / 4 deselected / 3 selected
 
-test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home ն}lɶ: 2025-11-05 18:48:29
-test_cases/client/test_pc_home.py::TestPcHome::test_enter_pc_home
-PASSED [ 33%]PROGRESS:33
+test_cases/client/test_momo.py::TestMomo::test_momo_home_page[chromium-測試進入momo首頁，檢查title是否正確] PASSED [ 33%]PROGRESS:33
 
-test_cases/client/test_pc_home.py::TestPcHome::test_search_product[] test_cases/client/test_pc_home.py::TestPcHome::test_search_product[]
+test_cases/client/test_momo.py::TestMomo::test_search_product[chromium-測試搜尋手機的結果] 產品名稱: Samsung 三星 Galaxy S24 Ultra 5G 6.8吋(12G/256G/高通驍龍8 Gen3/2億鏡頭畫素/AI手機)
 PASSED [ 66%]PROGRESS:66
 
-test_cases/client/test_pc_home.py::TestPcHome::test_search_product[] test_cases/client/test_pc_home.py::TestPcHome::test_search_product[]
-PASSED [100%]Report successfully generated to C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\temp_results\..\ClientTest00002\temp_generate
-PROGRESS:100
-յɶ: 2025-11-05 18:48:44
-ϥ allure CLI: C:\Users\Allen\scoop\shims\allure.CMD
+test_cases/client/test_momo.py::TestMomo::test_search_product[chromium-測試搜尋手沖咖啡組的結果] 產品名稱: Driver 達人進階手沖咖啡套裝組(五件組 手沖壺 咖啡濾杯 耐熱玻璃壺 手搖磨豆機 咖啡豆匙 手沖咖啡組)
+PASSED [100%]PROGRESS:100
+測試結束時間: 2025-11-13 10:42:36
+最終報告目錄: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\ClientTest00002
 
-allure single-file report generated at: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\temp_results\..\ClientTest00002\ClientTest00002_20251105_184846.html
+allure single-file report generated at: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\ClientTest00002\ClientTest00002_20251113_104238.html
 
 
-============================= 3 passed in 17.16s ==============================
+====================== 3 passed, 4 deselected in 20.88s =======================
 
-start_time: 2025-11-05 18:48:28
-end_time: 2025-11-05 18:48:46
-execution_time: 17.58
+start_time: 2025-11-13 10:42:16
+end_time: 2025-11-13 10:42:38
+execution_time: 21.35
 test_result: PASS

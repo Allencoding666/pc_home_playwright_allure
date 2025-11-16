@@ -1,16 +1,16 @@
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Iterator
 
 import allure
 import pytest
-from playwright.sync_api import sync_playwright, Browser, BrowserContext
+from playwright.sync_api import Browser, BrowserContext
 
-from helper import CustomPage, update_tag_registry
+from helper import CustomPage, StepCounter, update_tag_registry
 
 
 def pytest_addoption(parser):
@@ -23,51 +23,41 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_and_teardown():
-
-    print("測試開始時間:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    yield
-    print("測試結束時間:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+@pytest.fixture
+def sc() -> StepCounter:
+    """
+    名稱sc為step_counter縮寫
+    提供一個在每個測試函式內自動計數的步驟產生器。
+    每次呼叫會回傳 "Step 01: xxx", "Step 02: xxx", ...
+    """
+    return StepCounter()
 
 
 # ====================================
 # | 瀏覽器 |
 # ====================================
 @pytest.fixture(scope="class")
-def create_browser(request) -> Iterator[Browser]:
-    """每個測試 class 建立一個獨立的瀏覽器實例"""
-
-    # 從 pytest 的設定中讀取 --headed 參數是否存在
-    is_headed = request.config.getoption("--headed")
-
-    with sync_playwright() as p:
-        br = p.chromium.launch(headless=not is_headed)
-        request.cls.br = br
-        yield br
-        br.close()
-
-
-@pytest.fixture(scope="class")
-def create_context(request, create_browser) -> Iterator[BrowserContext]:
+def create_context(
+    request, browser: Browser, browser_context_args: dict
+) -> Iterator[BrowserContext]:
     """每個測試 class 建立一個獨立的瀏覽器上下文"""
-
-    br_ctx = create_browser.new_context()
-
+    # `browser` 和 `browser_context_args` 由 pytest-playwright 插件自動提供。
+    # `browser_context_args` 包含了所有來自 pytest.ini 或命令列的設定 (例如 screenshot, headless 等)。
+    # 我們使用字典合併，將我們的自訂設定（如 viewport）與插件的設定結合起來。
+    context = browser.new_context(
+        **{**browser_context_args, "viewport": {"width": 1920, "height": 1080}}
+    )
     # 把 context 存到 class 內，讓 setup_class() 也能用
-    request.cls.br_ctx = br_ctx
-
-    yield br_ctx
-    br_ctx.close()
+    request.cls.br_ctx = context
+    yield context
+    context.close()
 
 
 @pytest.fixture(scope="class")
-def create_page(request, create_context) -> Iterator[CustomPage]:
+def create_page(request, create_context: BrowserContext) -> Iterator[CustomPage]:
     """每個測試 class 建立共用的 page"""
-
     page = create_context.new_page()
     page.set_default_timeout(10000)
-    page.set_viewport_size({"width": 1920, "height": 1080})
 
     # 將 pytest 的 request 物件傳入 CustomPage
     custom_page = CustomPage(page)
@@ -130,16 +120,25 @@ def pytest_sessionfinish(session, exitstatus):
     """
     測試會話結束後，根據 --alluredir 和 --run-tag 生成單一檔案的 Allure 報告。
     """
+
+    print("測試結束時間:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     run_tag = session.config.getoption("--run-tag")
     results_dir = session.config.getoption("--alluredir")
 
-    # 如果沒有指定 allure 結果目錄或 run_tag，則不生成報告
-    if not results_dir or not run_tag:
-        print("未指定 --alluredir 或 --run-tag，跳過 Allure 報告生成。")
+    # 核心條件：只有當 --run-tag 被指定時，我們才生成最終的單一檔案報告
+    if not run_tag:
+        # 如果是普通的 pytest 執行，清理臨時報告目錄即可
+        if (
+            results_dir
+            and "local_temp_results" in results_dir
+            and os.path.isdir(results_dir)
+        ):
+            shutil.rmtree(results_dir, ignore_errors=True)
         return
 
-    if not os.path.exists(results_dir):
-        print(f"沒有找到 {results_dir}，可能是測試沒有產生任何結果")
+    # 防禦性檢查：如果 results_dir 不存在，則無法生成報告
+    if not results_dir:
+        print("錯誤：找不到 Allure 結果目錄 (alluredir)。請檢查 pytest.ini 設定。")
         return
 
     # --- 找到 Allure CLI ---
@@ -155,13 +154,17 @@ def pytest_sessionfinish(session, exitstatus):
         print("找不到 allure CLI，請確認已安裝並設定 PATH")
         return
 
-    print(f"使用 allure CLI: {allure_path}")
-
     # --- 準備報告目錄和檔名 ---
     # 將 tag 中的逗號替換為底線，以建立有效的資料夾和檔案名稱
     safe_run_tag = run_tag.replace(",", "_")
     # 報告將存放在 reports/<safe_run_tag>/ 目錄下
-    final_report_dir = os.path.join(os.path.dirname(results_dir), "..", safe_run_tag)
+    if "local_temp_results" in results_dir:
+        reports_base_dir = os.path.join(os.path.dirname(results_dir))
+    else:
+        reports_base_dir = os.path.dirname(os.path.dirname(results_dir))
+
+    final_report_dir = os.path.join(reports_base_dir, safe_run_tag)
+    print("最終報告目錄:", final_report_dir)
     os.makedirs(final_report_dir, exist_ok=True)
 
     # 臨時生成目錄，避免多個進程同時寫入同一個 index.html
@@ -180,6 +183,7 @@ def pytest_sessionfinish(session, exitstatus):
                 temp_generate_dir,
             ],
             check=True,
+            stdout=subprocess.DEVNULL,  # 關掉allure的CLI輸出，避免紀錄多於資訊
         )
         # --- 重新命名並移動報告 ---
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -203,8 +207,6 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(autouse=True)
 def setup_suite(request):
-    print(request.node.nodeid)
-
     # 抓取測試檔案的路徑資訊，看是哪個端口的測試，並設定 Allure 的 parent_suite
     file_path = Path(request.node.fspath)
     parent_folder = file_path.parent.name

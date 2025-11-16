@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocketState
 
 import settings
+from helper import get_allure_results_dir
 from routers.schemas import (
     BaseReceive,
     ReportInfo,
@@ -211,11 +212,16 @@ async def run_test_task(test_id: str, test_args: List[str]):
         test_info["status"] = "running"
         test_info["progress"] = 0
 
+        # 準備環境變數，強制 pytest 子程序使用 UTF-8 輸出，解決日誌亂碼問題
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+
         # 開 subprocess 執行 pytest
         process = await asyncio.create_subprocess_exec(
             *test_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
         )
 
         # 標記正在執行的 process
@@ -454,16 +460,7 @@ async def ws_test_manager(websocket: WebSocket):
                 # 將此連線加入監聽列表
                 settings.TEST_MANAGER[cmd.test_id]["connections"].add(websocket)
                 # 準備 pytest 參數
-                # 建立一個唯一的 allure results 目錄，避免多個測試同時執行時發生衝突
-                safe_test_id = cmd.test_id.replace(",", "_")
-                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                allure_results_dir = os.path.join(
-                    settings.ROOT_PATH,
-                    "reports",
-                    "temp_results",
-                    f"{safe_test_id}_{timestamp}",
-                )
-
+                allure_results_dir = get_allure_results_dir(cmd.test_id)
                 test_args: List[str] = [
                     "pytest",
                     f"--run-tag={cmd.test_id}",

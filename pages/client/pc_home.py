@@ -12,9 +12,10 @@ class PcHome:
     def close_pop_up(self):
         """關閉彈出視窗"""
 
-        close_button = self.page.locator('//button[@aria-label="close button"]')
-        if close_button.is_visible(timeout=3000):
-            close_button.click()
+        try:
+            self.page.locator('//button[@aria-label="close button"]').click()
+        except:
+            pass
 
     def search_product(self, keyword: str):
         """搜尋產品
@@ -33,6 +34,10 @@ class PcHome:
         Args:
             product_index: 產品索引，從1開始
         """
-        self.page.locator(f'(//div[@class="c-listInfoGrid__body"]//li)[{product_index}]').click()
-        product_name = self.page.locator('//div[@class="o-prodMainName o-prodMainName--prodNick"]').text_content()
+        self.page.locator(
+            f'(//div[@class="c-listInfoGrid__body"]//li)[{product_index}]'
+        ).click()
+        product_name = self.page.locator(
+            '//div[@class="o-prodMainName o-prodMainName--prodNick"]'
+        ).text_content()
         self.page.cp_screenshot_and_attach(img_name=f"{product_name}")
