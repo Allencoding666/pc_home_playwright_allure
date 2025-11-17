@@ -1,10 +1,10 @@
 import asyncio
 from datetime import datetime
 import os
-import yaml
 import re
 import subprocess
 from typing import List, Set
+import aiosqlite
 
 from fastapi import (
     APIRouter,
@@ -414,26 +414,39 @@ async def ws_test_manager(websocket: WebSocket):
                 # 檢查路徑衝突：要執行的測試是否與正在運行的測試共享任何測試案例
                 conflicting_tasks = []
                 try:
-                    # 從 YAML 讀取最新的 tag 資訊
-                    tag_registry_path = os.path.join(
-                        settings.ROOT_PATH, "tag_registry.yaml"
-                    )
-                    with open(tag_registry_path, "r", encoding="utf-8") as f:
-                        all_tags_info = yaml.safe_load(f)
+                    # 透過資料庫檢查路徑衝突
+                    async with aiosqlite.connect(settings.DB_PATH) as db:
+                        # 1. 獲取目標測試的所有路徑
+                        cursor = await db.execute(
+                            "SELECT path FROM test_paths WHERE tag_name = ?",
+                            (cmd.test_id,),
+                        )
+                        target_paths = {row[0] for row in await cursor.fetchall()}
 
-                    # 獲取目標測試的路徑集合
-                    target_tag_info = all_tags_info.get(cmd.test_id, {})
-                    target_paths = set(target_tag_info.get("paths", []))
+                        if not target_paths:
+                            raise ValueError(
+                                f"Test ID '{cmd.test_id}' has no paths in the registry."
+                            )
 
-                    # 遍歷所有正在運行的測試
-                    for running_test_id, test_info in settings.TEST_MANAGER.items():
-                        if test_info["status"] == "running":
-                            running_tag_info = all_tags_info.get(running_test_id, {})
-                            running_paths = set(running_tag_info.get("paths", []))
+                        # 2. 找出所有正在運行的任務
+                        running_task_ids = [
+                            tid
+                            for tid, tinfo in settings.TEST_MANAGER.items()
+                            if tinfo["status"] == "running"
+                        ]
 
-                            # 如果路徑集合有交集，則存在衝突
-                            if not target_paths.isdisjoint(running_paths):
-                                conflicting_tasks.append(running_test_id)
+                        if running_task_ids:
+                            # 3. 查詢這些正在運行的任務中，是否有任何一個的路徑與目標路徑重疊
+                            placeholders = ",".join("?" for _ in running_task_ids)
+                            query = f"""
+                                SELECT DISTINCT tag_name FROM test_paths
+                                WHERE tag_name IN ({placeholders}) AND path IN (SELECT path FROM test_paths WHERE tag_name = ?)
+                            """
+                            params = running_task_ids + [cmd.test_id]
+                            cursor = await db.execute(query, params)
+                            conflicting_tasks = [
+                                row[0] for row in await cursor.fetchall()
+                            ]
                 except Exception as e:
                     print(f"檢查資源衝突時出錯: {e}")
 

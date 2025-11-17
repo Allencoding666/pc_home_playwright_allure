@@ -4,18 +4,19 @@ cachedir: .pytest_cache
 rootdir: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure
 configfile: pytest.ini
 plugins: allure-pytest-2.15.0, anyio-4.10.0, base-url-2.1.0, playwright-0.7.0
-collecting ... collected 7 items / 6 deselected / 1 selected
+collecting ... Successfully updated test registry in 'C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure/test_registry.db'
+collected 7 items / 6 deselected / 1 selected
 
 test_cases/client/test_momo.py::TestMomo::test_momo_home_page[chromium-測試進入momo首頁，檢查title是否正確] PASSED [100%]PROGRESS:100
-測試結束時間: 2025-11-13 10:45:14
+測試結束時間: 2025-11-16 21:05:57
 最終報告目錄: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\ClientTest00001
 
-allure single-file report generated at: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\ClientTest00001\ClientTest00001_20251113_104516.html
+allure single-file report generated at: C:\Users\Allen\Documents\my_file\interview\pc_home_playwright_allure\reports\ClientTest00001\ClientTest00001_20251116_210559.html
 
 
-======================= 1 passed, 6 deselected in 5.99s =======================
+======================= 1 passed, 6 deselected in 5.75s =======================
 
-start_time: 2025-11-13 10:45:10
-end_time: 2025-11-13 10:45:17
-execution_time: 6.48
+start_time: 2025-11-16 21:05:53
+end_time: 2025-11-16 21:05:59
+execution_time: 6.20
 test_result: PASS

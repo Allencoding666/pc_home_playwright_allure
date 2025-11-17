@@ -4,3 +4,4 @@ allure_results/
 screenshots/
 reports/
 local_reports/
+test_registry.db

@@ -1,11 +1,12 @@
 import os
 import re
-import yaml
+import sqlite3
 
 DEBUG_MODE = True
 
 ROOT_PATH = os.path.dirname(os.path.abspath(__file__))
 LOGS_PATH = os.path.join(ROOT_PATH, "logs")
+DB_PATH = os.path.join(ROOT_PATH, "test_registry.db")
 
 
 def _get_last_run_info_from_log(test_id: str) -> dict:
@@ -62,38 +63,44 @@ def _get_last_run_info_from_log(test_id: str) -> dict:
 
 def initialize_test_manager():
     """
-    從 tag_registry.yaml 初始化 TEST_MANAGER。
-    服務啟動時，掃描所有可用的測試標籤並建立預設狀態。
+    從 test_registry.db 初始化 TEST_MANAGER。
+    服務啟動時，從資料庫讀取所有可用的測試標籤並建立預設狀態。
     """
     manager = {}
     os.makedirs(LOGS_PATH, exist_ok=True)  # 確保 logs 資料夾存在
-    tag_registry_path = os.path.join(ROOT_PATH, "tag_registry.yaml")
+
+    if not os.path.exists(DB_PATH):
+        print(f"Warning: Database '{DB_PATH}' not found. TEST_MANAGER will be empty.")
+        print("Please run pytest with the collection plugin to generate it.")
+        return {}
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
     try:
-        with open(tag_registry_path, "r", encoding="utf-8") as f:
-            tags = yaml.safe_load(f)
-            if not tags:
-                return {}
-            for tag_name, tag_info in tags.items():
-                last_run_info = _get_last_run_info_from_log(tag_name)
-                manager[tag_name] = {
-                    # 增加對舊格式的相容性：如果 tag_info 是 dict，則 get description；如果是 list，則 description 為空字串
-                    "description": (
-                        tag_info.get("description", "")
-                        if isinstance(tag_info, dict)
-                        else ""
-                    ),
-                    "status": "idle",  # idle, running
-                    "connections": set(),
-                    "progress": 0,
-                    "process": None,
-                    "last_result": last_run_info["last_result"],
-                    "last_excuted_time": None,
-                    "start_time": last_run_info["start_time"],
-                    "end_time": last_run_info["end_time"],
-                    "execution_time": last_run_info["execution_time"],
-                }
-    except FileNotFoundError:
-        print(f"Warning: {tag_registry_path} not found. TEST_MANAGER will be empty.")
+        cursor.execute("SELECT name, description FROM tags ORDER BY name")
+        tags = cursor.fetchall()
+        for tag in tags:
+            last_run_info = _get_last_run_info_from_log(tag["name"])
+            manager[tag["name"]] = {
+                "description": tag["description"],
+                "status": "idle",  # idle, running
+                "connections": set(),
+                "progress": 0,
+                "process": None,
+                "last_result": last_run_info["last_result"],
+                "last_excuted_time": None,
+                "start_time": last_run_info["start_time"],
+                "end_time": last_run_info["end_time"],
+                "execution_time": last_run_info["execution_time"],
+            }
+    except sqlite3.OperationalError as e:
+        print(
+            f"Error reading from database: {e}. The database might be empty or corrupt."
+        )
+    finally:
+        conn.close()
     return manager
 
 
