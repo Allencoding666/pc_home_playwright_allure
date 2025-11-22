@@ -6,9 +6,8 @@ from pathlib import Path
 import allure
 import yaml
 from playwright.sync_api import Page
-import sqlite3
 
-from settings import ROOT_PATH
+from settings import ROOT_PATH, DB_PATH
 
 
 class CustomPage(Page):
@@ -60,7 +59,11 @@ def get_test(test_id: str):
     if test_info is None:
         raise ValueError(f"找不到測試 ID '{test_id}' 的相關資訊")
 
-    test_platform = re.search(r"^(.*?)Test", test_id).group(1)
+    match = re.search(r"^(.*?)Test", test_id)
+    if match:
+        test_platform = match.group(1)
+    else:
+        raise ValueError(f"無法從測試 ID '{test_id}' 中解析出測試平台")
 
     return test_platform, test_info
 
@@ -87,7 +90,7 @@ def get_test_data(test_platform: str, file_name: str):
         return {}
 
 
-def update_tag_registry(items, db_path=f"{ROOT_PATH}/test_registry.db"):
+def update_tag_registry(items):
     """
     掃描所有測試項目，生成一個 tag 到測試路徑的映射，並寫入 SQLite 資料庫。
     """
@@ -106,59 +109,96 @@ def update_tag_registry(items, db_path=f"{ROOT_PATH}/test_registry.db"):
                 if docstring:
                     temp_registry[tag_name]["descriptions"].append(docstring)
 
-    # 連線到資料庫
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    # 將 import 移至函式內部，避免循環匯入
+    from sqlalchemy.orm import Session
+    from database import SyncSessionLocal
+    from models import TestList, TestPath
 
-    # 建立表格 (如果不存在)
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tags (
-            name TEXT PRIMARY KEY,
-            description TEXT
-        )
-    """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS test_paths (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tag_name TEXT,
-            path TEXT,
-            FOREIGN KEY (tag_name) REFERENCES tags (name) ON DELETE CASCADE
-        )
-    """
-    )
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tag_name ON test_paths (tag_name)")
-
-    # 使用交易來確保原子性
+    db: Session = SyncSessionLocal()
     try:
-        cursor.execute("BEGIN")
-        # 清空舊資料
-        cursor.execute("DELETE FROM tags")
-        cursor.execute("DELETE FROM test_paths")
+        # 1. 獲取新舊 test_id 列表
+        new_test_ids = set(temp_registry.keys())
+        existing_tests = db.query(TestList.test_id).all()
+        existing_test_ids = {test_id for (test_id,) in existing_tests}
 
-        # 插入新資料
+        # 2. 找出並刪除過時的 test_id
+        ids_to_delete = existing_test_ids - new_test_ids
+        if ids_to_delete:
+            db.query(TestList).filter(TestList.test_id.in_(ids_to_delete)).delete(
+                synchronize_session=False
+            )
+            print(f"Removed obsolete test IDs: {', '.join(ids_to_delete)}")
+
+        # 3. 更新或插入新的測試項目
         for tag_name, data in sorted(temp_registry.items()):
-            # 使用最後一個非空的 docstring 作為描述
             description = next((d for d in reversed(data["descriptions"]) if d), "")
-            cursor.execute(
-                "INSERT INTO tags (name, description) VALUES (?, ?)",
-                (tag_name, description),
-            )
 
-            paths_to_insert = [(tag_name, path) for path in sorted(list(data["paths"]))]
-            cursor.executemany(
-                "INSERT INTO test_paths (tag_name, path) VALUES (?, ?)", paths_to_insert
-            )
+            # 使用 merge 來實現 "insert or update"
+            # 如果 test_id 已存在，它會更新 description；如果不存在，則會建立新紀錄
+            test_item = db.merge(TestList(test_id=tag_name, description=description))
 
-        conn.commit()
-        print(f"Successfully updated test registry in '{db_path}'")
+            # 4. 重建 test_paths
+            # 先刪除舊的
+            db.query(TestPath).filter(TestPath.tag_name == tag_name).delete()
+            # 再插入新的
+            paths_to_insert = [
+                TestPath(tag_name=tag_name, path=path)
+                for path in sorted(list(data["paths"]))
+            ]
+            db.add_all(paths_to_insert)
+
+        db.commit()
+        print(f"Successfully updated test list in '{DB_PATH}'")
     except Exception as e:
-        conn.rollback()
-        print(f"Failed to update test registry: {e}")
+        db.rollback()
+        print(f"Failed to update test list: {e}")
     finally:
-        conn.close()
+        db.close()
+
+
+def log_test_run(
+    test_id: str,
+    result: str,
+    start_time: str,
+    end_time: str,
+    execution_time: float,
+    progress: int,
+    log_content: str,
+):
+    """將單次測試執行結果記錄到資料庫中"""
+    # 將 import 移至函式內部，避免循環匯入
+    from sqlalchemy.orm import Session
+    from database import SyncSessionLocal
+    from models import TestList, TestRun
+
+    db: Session = SyncSessionLocal()
+    try:
+        # 1. 在 test_runs 中插入新的執行紀錄
+        new_run = TestRun(
+            test_id=test_id,
+            result=result,
+            start_time=start_time,
+            end_time=end_time,
+            execution_time=execution_time,
+            progress=progress,
+            log_content=log_content,
+        )
+        db.add(new_run)
+
+        # 2. 更新 test_list 中的最後一次執行結果
+        test_item = db.query(TestList).filter(TestList.test_id == test_id).one()
+        test_item.last_result = result
+        test_item.last_run_start_time = start_time
+        test_item.last_run_end_time = end_time
+        test_item.last_run_execution_time = execution_time
+        test_item.last_run_progress = progress
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Failed to log test run for '{test_id}': {e}")
+    finally:
+        db.close()
 
 
 def get_allure_results_dir(test_id: str) -> str:

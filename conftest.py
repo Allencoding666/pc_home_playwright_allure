@@ -77,6 +77,12 @@ def pytest_collection_modifyitems(config, items):
         item.name = item.name.encode("utf-8").decode("unicode-escape")  # 用例名稱
         item._nodeid = item.nodeid.encode("utf-8").decode("unicode-escape")  # 用例節點
 
+    # 只有在主進程中執行一次 (避免 xdist 多進程重複執行)
+    if not hasattr(config, "workerinput"):
+        from database import create_db_and_tables
+
+        create_db_and_tables()
+
     update_tag_registry(items)
 
     def get_run_tag_name():
@@ -237,7 +243,7 @@ class ProgressReporter:
         self.completed_tests += 1
         if self.total_tests > 0:
             progress = int((self.completed_tests / self.total_tests) * 100)
-            print(f"PROGRESS:{progress}", flush=True)
+            print(f"\nPROGRESS:{progress}", flush=True)
 
 
 def pytest_configure(config):

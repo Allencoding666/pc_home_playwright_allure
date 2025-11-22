@@ -1,21 +1,26 @@
 import asyncio
 from datetime import datetime
 import os
+import io
 import re
 import subprocess
-from typing import List, Set
-import aiosqlite
+from typing import AsyncGenerator, List, Set
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import (
     APIRouter,
     WebSocket,
     WebSocketDisconnect,
+    Depends,
 )
 from pydantic import ValidationError
 from starlette.websockets import WebSocketState
 
 import settings
-from helper import get_allure_results_dir
+from helper import get_allure_results_dir, log_test_run
+from database import AsyncSessionLocal
+from models import TestRun, TestPath
 from routers.schemas import (
     BaseReceive,
     ReportInfo,
@@ -24,10 +29,17 @@ from routers.schemas import (
     TestStatusResp,
     TestLogResp,
     TestMessageResp,
+    TestProgressResp,
     WSExecuteCommand,
 )
 
 tests_router = APIRouter()
+
+
+# Dependency to get an async database session
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 @tests_router.get("/api/status", response_model=TestStatusResp)
@@ -109,27 +121,43 @@ async def stop_tests(data: BaseReceive):
         return stop_tests_resp.model_dump(mode="json")
 
 
-@tests_router.get("/api/log/{test_id}", response_model=TestLogResp)
-async def get_test_log(test_id: str):
-    """獲取指定測試的歷史日誌"""
-    log_dir = os.path.join(settings.ROOT_PATH, "logs")
-    # 替換掉檔名中可能引起問題的字元，雖然路徑參數通常不會有逗號
-    safe_test_id = test_id.replace(",", "_")
-    log_file_path = os.path.join(log_dir, f"{safe_test_id}.log")
+@tests_router.get("/api/log/", response_model=TestLogResp)
+async def get_test_log(
+    test_id: str = None,
+    run_id: int = None,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    獲取指定測試的日誌。
+    - 如果提供 run_id，則獲取該次執行的日誌。
+    - 如果未提供 run_id，則獲取最新一次執行的日誌。
+    """
+    log = None
+    if run_id:
+        stmt = select(TestRun.log_content, TestRun.test_id).where(TestRun.id == run_id)
+        result = await db.execute(stmt)
+        run = result.first()
+        if run:
+            log, test_id = run
+    elif test_id:
+        stmt = (
+            select(TestRun.log_content)
+            .where(TestRun.test_id == test_id)
+            .order_by(desc(TestRun.id))
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        log = result.scalar_one_or_none()
+    else:
+        raise ValueError("未提供 test_id 或 run_id")
 
-    if not os.path.exists(log_file_path):
+    if log is None:
         return TestLogResp(
             test_id=test_id,
             data=TestLogResp.DataModel(log="暫無日誌可供查看，請執行測試後再重新查看"),
         )
 
-    with open(log_file_path, "r", encoding="utf-8") as f:
-        log_content = f.read()
-
-    return TestLogResp(
-        test_id=test_id,
-        data=TestLogResp.DataModel(log=log_content),
-    )
+    return TestLogResp(test_id=test_id, data=TestLogResp.DataModel(log=log))
 
 
 @tests_router.get("/api/reports/{test_id}", response_model=ReportListResp)
@@ -174,7 +202,7 @@ async def get_test_report(test_id: str):
     return ReportListResp(reports=report_infos)
 
 
-async def broadcast(resp: TestMessageResp):
+async def broadcast(resp: TestMessageResp | TestResultResp | TestProgressResp):
     """向特定測試的所有監聽者回傳訊息"""
     test_id = resp.model_dump().get("test_id")
 
@@ -199,14 +227,8 @@ async def broadcast(resp: TestMessageResp):
 async def run_test_task(test_id: str, test_args: List[str]):
     """在背景執行單次測試任務，並透過 WebSocket 回報進度"""
     start_time = datetime.now()
-    log_file_path = ""  # 確保在 finally 區塊中可用
     final_result = "ERROR"  # 預設結果為錯誤，除非被成功覆蓋
     try:
-        log_dir = os.path.join(settings.ROOT_PATH, "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        safe_test_id = test_id.replace(",", "_")
-        log_file_path = os.path.join(log_dir, f"{safe_test_id}.log")
-
         # 更新測試狀態為 'running'
         test_info = settings.TEST_MANAGER[test_id]
         test_info["status"] = "running"
@@ -227,45 +249,43 @@ async def run_test_task(test_id: str, test_args: List[str]):
         # 標記正在執行的 process
         test_info["process"] = process
 
-        stat_test_resp = TestMessageResp(
+        start_test_resp = TestMessageResp(
             test_id=test_id,
             data=TestMessageResp.DataModel(
                 level="info", message=f"執行測試: {test_id}"
             ),
         )
-        await broadcast(stat_test_resp)
+        await broadcast(start_test_resp)
 
         # 即時讀取 stdout
-        async def stream_output(stream, log_file):
+        async def stream_output(stream):
+            log_buffer = io.StringIO()
             async for raw_line in stream:
                 line = raw_line.decode("utf-8", errors="ignore").rstrip()
-                log_file.write(line + "\n")
-                log_file.flush()
+                log_buffer.write(line + "\n")
 
                 # 檢查是否為進度回報
                 progress_match = re.match(r"^PROGRESS:(\d+)$", line)
                 if progress_match:
                     percentage = int(progress_match.group(1))
                     test_info["progress"] = percentage
-                    # TODO 改成回報測試進度
-                    # progress_resp = {
-                    #     "test_id": test_id,
-                    #     "type": "progress",
-                    #     "percentage": percentage,
-                    # }
-                    progress_resp = {
-                        "test_id": test_id,
-                        "type": "info",
-                        "message": percentage,
-                    }
-                    # await broadcast(test_id, progress_resp)
+                    progress_resp = TestProgressResp(
+                        test_id=test_id,
+                        data=TestProgressResp.DataModel(
+                            percentage=percentage,
+                        ),
+                    )
+                    await broadcast(progress_resp)
+            return log_buffer.getvalue()
 
         # 同時處理 stdout 和 stderr
-        with open(log_file_path, "w", encoding="utf-8") as log_f:
-            await asyncio.gather(
-                stream_output(process.stdout, log_f),
-                stream_output(process.stderr, log_f),
-            )
+        # 使用 asyncio.gather 並行處理 stdout 和 stderr，並收集它們的內容
+        stdout_task = asyncio.create_task(stream_output(process.stdout))
+        stderr_task = asyncio.create_task(stream_output(process.stderr))
+
+        stdout_content, stderr_content = await asyncio.gather(stdout_task, stderr_task)
+        # 將 stdout 和 stderr 的內容合併為最終的日誌
+        log_content = stdout_content + stderr_content
 
         # 等待結束
         exit_code = await process.wait()
@@ -316,26 +336,30 @@ async def run_test_task(test_id: str, test_args: List[str]):
             start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
             end_time_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
             execution_duration = end_time - start_time
-            execution_time_str = f"{execution_duration.total_seconds():.2f}"
+            execution_time_sec = execution_duration.total_seconds()
+            progress = test_info["progress"]
 
-            # 將最終測試結果寫入日誌檔案的末尾
-            if log_file_path and os.path.exists(log_file_path):
-                with open(log_file_path, "a", encoding="utf-8") as log_f:
-                    log_f.write(f"\nstart_time: {start_time_str}\n")
-                    log_f.write(f"end_time: {end_time_str}\n")
-                    log_f.write(f"execution_time: {execution_time_str}\n")
-                    log_f.write(f"test_result: {final_result}\n")
+            # 將執行結果寫入資料庫
+            log_test_run(
+                test_id,
+                final_result,
+                start_time_str,
+                end_time_str,
+                execution_time_sec,
+                progress,
+                log_content,
+            )
 
-            # 同步更新記憶體中的 TEST_MANAGER 狀態
+            # 同步更新記憶體中的 TEST_MANAGER 狀態 (從資料庫讀取會更一致，但為了效能暫時在記憶體中更新)
             test_info = settings.TEST_MANAGER[test_id]
             test_info["last_result"] = final_result
             test_info["start_time"] = start_time_str
             test_info["end_time"] = end_time_str
-            test_info["execution_time"] = execution_time_str
+            test_info["execution_time"] = f"{execution_time_sec:.2f}"
 
             # 重設運行狀態
-            test_info["status"] = "idle"  # 無論如何，最終狀態都應是 idle
-            test_info["progress"] = 0
+            if test_info["status"] != "stopped":
+                test_info["status"] = "idle"
             test_info["process"] = None
             test_info[
                 "connections"
@@ -414,41 +438,40 @@ async def ws_test_manager(websocket: WebSocket):
                 # 檢查路徑衝突：要執行的測試是否與正在運行的測試共享任何測試案例
                 conflicting_tasks = []
                 try:
-                    # 透過資料庫檢查路徑衝突
-                    async with aiosqlite.connect(settings.DB_PATH) as db:
+                    async with AsyncSessionLocal() as db:
                         # 1. 獲取目標測試的所有路徑
-                        cursor = await db.execute(
-                            "SELECT path FROM test_paths WHERE tag_name = ?",
-                            (cmd.test_id,),
+                        target_paths_stmt = select(TestPath.path).where(
+                            TestPath.tag_name == cmd.test_id
                         )
-                        target_paths = {row[0] for row in await cursor.fetchall()}
+                        target_paths_result = await db.execute(target_paths_stmt)
+                        target_paths = {p for (p,) in target_paths_result.all()}
 
                         if not target_paths:
                             raise ValueError(
                                 f"Test ID '{cmd.test_id}' has no paths in the registry."
                             )
 
-                        # 2. 找出所有正在運行的任務
+                        # 2. 找出所有正在運行的任務 ID
                         running_task_ids = [
                             tid
                             for tid, tinfo in settings.TEST_MANAGER.items()
                             if tinfo["status"] == "running"
                         ]
 
+                        # 3. 查詢這些正在運行的任務中，是否有任何一個的路徑與目標路徑重疊
                         if running_task_ids:
-                            # 3. 查詢這些正在運行的任務中，是否有任何一個的路徑與目標路徑重疊
-                            placeholders = ",".join("?" for _ in running_task_ids)
-                            query = f"""
-                                SELECT DISTINCT tag_name FROM test_paths
-                                WHERE tag_name IN ({placeholders}) AND path IN (SELECT path FROM test_paths WHERE tag_name = ?)
-                            """
-                            params = running_task_ids + [cmd.test_id]
-                            cursor = await db.execute(query, params)
+                            conflict_stmt = (
+                                select(TestPath.tag_name)
+                                .where(TestPath.tag_name.in_(running_task_ids))
+                                .where(TestPath.path.in_(target_paths))
+                                .distinct()
+                            )
+                            conflict_result = await db.execute(conflict_stmt)
                             conflicting_tasks = [
-                                row[0] for row in await cursor.fetchall()
+                                tid for (tid,) in conflict_result.all()
                             ]
                 except Exception as e:
-                    print(f"檢查資源衝突時出錯: {e}")
+                    print(f"檢查資源衝突時出錯: {type(e).__name__}: {e}")
 
                 if conflicting_tasks:
                     # 將此連線加入所有衝突任務的監聽列表

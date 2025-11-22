@@ -19,7 +19,7 @@ class BaseReceive(BaseModel):
 class BaseResp(BaseModel):
     """WebSocket 發送的格式"""
 
-    type: Literal["test_status", "test_log", "message", "test_result"]
+    type: Literal["test_status", "test_log", "message", "test_result", "progress"]
     test_id: Optional[str] = Field(default=None, description="測試或任務的唯一 ID")
     timestamp: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -41,13 +41,13 @@ class TestStatusResp(BaseResp):
         end_time: Optional[str]
         execution_time: Optional[str]
         last_result: Optional[
-            Literal["PASS", "FAIL", "ERROR", "STOPPED", "NO TEST LOG"]
+            Literal["PASS", "FAIL", "ERROR", "STOPPED", "NO TEST LOG", "NOT RUN"]
         ]
 
     data: dict[str, TestInfoModel]
 
 
-class TestLogResp(BaseModel):
+class TestLogResp(BaseResp):
     type: Literal["test_log"] = "test_log"
     test_id: str
 
@@ -57,13 +57,23 @@ class TestLogResp(BaseModel):
     data: DataModel
 
 
-class TestMessageResp(BaseModel):
+class TestMessageResp(BaseResp):
     type: Literal["message"] = "message"
     test_id: str = ""
 
     class DataModel(BaseModel):
         level: Literal["info", "warning", "success", "error"] = "info"
         message: str
+
+    data: DataModel
+
+
+class TestProgressResp(BaseResp):
+    type: Literal["progress"] = "progress"
+    test_id: str = ""
+
+    class DataModel(BaseModel):
+        percentage: int
 
     data: DataModel
 
