@@ -264,8 +264,10 @@ async def run_test_task(test_id: str, test_args: List[str]):
                 line = raw_line.decode("utf-8", errors="ignore").rstrip()
                 log_buffer.write(line + "\n")
 
-                # 檢查是否為進度回報
-                progress_match = re.match(r"^PROGRESS:(\d+)$", line)
+                # 檢查是否為進度回報。
+                # 尋找 pytest 輸出中類似 "[ 33%]" 的模式。
+                # \s* 用於匹配數字前後可能存在的空格。
+                progress_match = re.search(r"\[\s*(\d+)\s*%\]", line)
                 if progress_match:
                     percentage = int(progress_match.group(1))
                     test_info["progress"] = percentage

@@ -7,3 +7,4 @@ PyYAML==6.0.2
 allure-pytest
 aiosqlite
 sqlalchemy[asyncio]
+Appium-Python-Client

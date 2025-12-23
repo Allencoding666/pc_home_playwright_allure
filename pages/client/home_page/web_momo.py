@@ -35,7 +35,7 @@ class Momo:
         self.page.locator('//input[@name="search-input"]').fill(keyword)
         self.page.locator('//input[@name="search-input"]/../..//button').click()
         self.page.wait_for_load_state("load")
-        self.page.cp_screenshot_and_attach(img_name=f"搜尋[{keyword}]")
+        self.page.cm_screenshot_and_attach(img_name=f"搜尋[{keyword}]")
 
     def click_product(self, product_index: str):
         """點擊產品
@@ -66,5 +66,5 @@ class Momo:
 
         product_name = product_name_locator.text_content().strip()
         if product_name:
-            self.page.cp_screenshot_and_attach(img_name=f"{product_name}")
+            self.page.cm_screenshot_and_attach(img_name=f"{product_name}")
         return product_name

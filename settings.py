@@ -32,7 +32,7 @@ def initialize_test_manager():
                 "description": test.description,
                 "status": "idle",  # idle, running
                 "connections": set(),
-                "progress": test.last_run_progress,
+                "progress": test.last_run_progress if test.last_run_progress else 0,
                 "process": None,
                 "last_result": test.last_result or "NOT RUN",
                 "last_excuted_time": None,

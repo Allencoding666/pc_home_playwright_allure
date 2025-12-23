@@ -1,41 +1,41 @@
 import os
 import re
 from datetime import datetime
-from pathlib import Path
 
 import allure
 import yaml
 from playwright.sync_api import Page
+from appium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from appium.webdriver.common.appiumby import AppiumBy
+from selenium.webdriver.common.by import By
+
 
 from settings import ROOT_PATH, DB_PATH
 
 
 class CustomPage(Page):
+    """
+    一個自訂的 Playwright Page，用於擴充 Page 的功能。
+    此類別繼承自 Page 以獲得類型提示和 isinstance 支援，
+    但內部透過 __getattr__ 將所有呼叫代理到一個真實的 page 實例，
+    從而結合了繼承和組合的優點。
+    """
+
     def __init__(self, page: Page):
-        super().__init__(page._impl_obj)
         self._page = page
         self._img_count = 1
 
-    def cp_screenshot(self, *args, img_name="", **kwargs):
-        os.makedirs("screenshots", exist_ok=True)
+    def __getattr__(self, name):
+        return getattr(self._page, name)
 
-        if "path" not in kwargs:
-            img_name = (
-                datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-                if not img_name
-                else img_name
-            )
-            kwargs["path"] = f"screenshots/({self._img_count}){img_name}.png"
-        else:
-            kwargs["path"] = re.sub(
-                r"\.(?=[^.]+$)", f"_({self._img_count}).", kwargs["path"]
-            )
+    def reset_counters(self):
+        """重置此實例中的所有內部計數器。"""
+        self._img_count = 1
 
-        self._img_count += 1
-
-        return self._page.screenshot(*args, **kwargs)
-
-    def cp_screenshot_and_attach(self, img_name=""):
+    def cm_screenshot_and_attach(self, img_name=""):
+        """擷取螢幕截圖並附加到 Allure 報告中。"""
         img_name = (
             datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if not img_name else img_name
         )
@@ -48,6 +48,78 @@ class CustomPage(Page):
             attachment_type=allure.attachment_type.PNG,
         )
         self._img_count += 1
+
+
+class CustomAndroidDriver(webdriver.Remote):
+    """
+    一個自訂的 Appium Android Driver，用於擴充 webdriver.Remote 的功能。
+    採用組合而非繼承，以代理原始 driver 的所有屬性和方法，並添加自訂功能。
+    """
+
+    def __init__(self, driver: webdriver.Remote):
+        self._driver = driver
+        self._finder_map = {
+            "XPATH": AppiumBy.XPATH,
+            "ACCESSIBILITY_ID": AppiumBy.ACCESSIBILITY_ID,
+            "ID": AppiumBy.ID,
+        }
+        self._img_count = 1
+
+    def __getattr__(self, name):
+        """當訪問的屬性在 CustomAndroidDriver 中不存在時，從原始 driver 中尋找。"""
+        return getattr(self._driver, name)
+
+    def reset_counters(self):
+        """重置此實例中的所有內部計數器。"""
+        self._img_count = 1
+
+    def _get_finder(self, finder: str):
+
+        try:
+            return self._finder_map[finder]
+        except KeyError:
+            raise ValueError(f"無效的定位方式: {finder}")
+
+    def cm_wait_ele_visibility(self, locator: str, finder: str = "XPATH", timeout=10):
+        """等待元素可見"""
+
+        return WebDriverWait(self._driver, timeout).until(
+            EC.visibility_of_element_located((self._get_finder(finder), locator))
+        )
+
+    def cm_wait_ele_clickable(self, locator: str, finder: str = "XPATH", timeout=10):
+        """等待元素可點擊"""
+
+        return WebDriverWait(self._driver, timeout).until(
+            EC.element_to_be_clickable((self._get_finder(finder), locator))
+        )
+
+    def screenshot_and_attach(self, img_name=""):
+        """擷取螢幕截圖並附加到 Allure 報告中。"""
+        img_name = (
+            datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if not img_name else img_name
+        )
+        img = self._driver.get_screenshot_as_png()
+        allure.attach(
+            img,
+            name=f"({self._img_count}){img_name}",
+            attachment_type=allure.attachment_type.PNG,
+        )
+        self._img_count += 1
+
+
+class StepCounter:
+    """一個簡單的步驟計數器，用於在 Allure 報告中生成有序的步驟名稱。"""
+
+    def __init__(self):
+        self._count = 0
+
+    def __call__(self, description: str) -> str:
+        """
+        呼叫實例時，計數器加一並回傳格式化的步驟字串。
+        """
+        self._count += 1
+        return f"Step {self._count:02d}: {description}"
 
 
 def get_test(test_id: str):
@@ -68,10 +140,10 @@ def get_test(test_id: str):
     return test_platform, test_info
 
 
-def get_test_data(test_platform: str, file_name: str):
+def get_test_data(file_path: str):
     try:
         with open(
-            f"{ROOT_PATH}/test_data/{test_platform}/{file_name}.yaml",
+            f"{ROOT_PATH}/{file_path}",
             "r",
             encoding="utf-8",
         ) as yaml_file:
@@ -79,14 +151,10 @@ def get_test_data(test_platform: str, file_name: str):
 
         return yaml_data
     except FileNotFoundError:
-        print(
-            f'Error: "{ROOT_PATH}/test_data/{test_platform}/{file_name}.yaml" not found.'
-        )
+        print(f'Error: "{ROOT_PATH}/{file_path}" not found.')
         return {}
     except yaml.YAMLError as e:
-        print(
-            f"Error parsing {ROOT_PATH}/test_data/{test_platform}/{file_name}.yaml: {e}"
-        )
+        print(f"Error parsing {ROOT_PATH}/{file_path}: {e}")
         return {}
 
 
@@ -217,17 +285,3 @@ def get_allure_results_dir(test_id: str) -> str:
     return os.path.join(
         ROOT_PATH, "reports", "temp_results", f"{safe_test_id}_{timestamp}"
     )
-
-
-class StepCounter:
-    """一個簡單的步驟計數器，用於在 Allure 報告中生成有序的步驟名稱。"""
-
-    def __init__(self):
-        self._count = 0
-
-    def __call__(self, description: str) -> str:
-        """
-        呼叫實例時，計數器加一並回傳格式化的步驟字串。
-        """
-        self._count += 1
-        return f"Step {self._count:02d}: {description}"

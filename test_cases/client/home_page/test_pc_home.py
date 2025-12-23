@@ -5,10 +5,10 @@ import allure
 import pytest
 
 from helper import get_test_data
-from pages.client.pc_home import PcHome
+from pages.client.home_page.web_pc_home import PcHome
 
 
-PC_HOME_DATA = get_test_data(test_platform="client", file_name="pc_home")
+PC_HOME_DATA = get_test_data(file_path="test_data/client/home_page/pc_home.yaml")
 SEARCH_PRODUCT_DATA = PC_HOME_DATA["search_product"]
 
 
@@ -30,7 +30,7 @@ class TestPcHome:
         allure.dynamic.title("進入PChome首頁")
         allure.dynamic.description("開啟瀏覽器後，是否能正常進入PChome首頁")
         self.pc_home.go_to_pc_home()
-        self.pc_home.page.cp_screenshot_and_attach(img_name="PChome首頁")
+        self.pc_home.page.cm_screenshot_and_attach(img_name="PChome首頁")
 
     # @pytest.mark.tag(name="ClientTest00002", order=2)
     @pytest.mark.parametrize(

@@ -1,7 +1,6 @@
 import os
 import shutil
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator
@@ -9,8 +8,10 @@ from typing import Iterator
 import allure
 import pytest
 from playwright.sync_api import Browser, BrowserContext
+from appium import webdriver
+from appium.options.android import UiAutomator2Options
 
-from helper import CustomPage, StepCounter, update_tag_registry
+from helper import CustomPage, CustomAndroidDriver, StepCounter, update_tag_registry
 
 
 def pytest_addoption(parser):
@@ -23,7 +24,7 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
+@pytest.fixture()
 def sc() -> StepCounter:
     """
     名稱sc為step_counter縮寫
@@ -34,8 +35,10 @@ def sc() -> StepCounter:
 
 
 # ====================================
-# | 瀏覽器 |
+# | web |
 # ====================================
+
+
 @pytest.fixture(scope="class")
 def create_context(
     request, browser: Browser, browser_context_args: dict
@@ -65,6 +68,58 @@ def create_page(request, create_context: BrowserContext) -> Iterator[CustomPage]
 
     yield custom_page
     custom_page.close()
+
+
+# ====================================
+# | mobile driver |
+# ====================================
+
+
+@pytest.fixture(scope="class")
+def create_android_driver(request) -> Iterator[CustomAndroidDriver]:
+    """每個測試 class 建立共用的 android driver，並回傳自訂的 CustomAndroidDriver。"""
+
+    capabilities = dict(
+        platformName="Android",
+        automationName="uiautomator2",
+        deviceName="Android",
+        language="en",
+        locale="US",
+    )
+
+    appium_server_url = "http://localhost:4723"
+    android_driver = webdriver.Remote(
+        appium_server_url,
+        options=UiAutomator2Options().load_capabilities(capabilities),
+    )
+
+    # 將原始 driver 包裝成自訂的 CustomAndroidDriver
+    custom_driver = CustomAndroidDriver(android_driver)
+
+    yield custom_driver
+    android_driver.quit()
+
+
+# ====================================
+# | other |
+# ====================================
+
+
+@pytest.fixture(scope="function", autouse=True)
+def reset_page_counters(request):
+    """
+    在每個測試函式執行前，重置 CustomPage 或 CustomAndroidDriver 中的計數器。
+    """
+    # 檢查 class 是否有 page 屬性 (來自 create_page fixture)
+    if hasattr(request.cls, "page") and hasattr(request.cls.page, "reset_counters"):
+        request.cls.page.reset_counters()
+    # 檢查 class 是否有 momo.driver 屬性 (來自 test_android_momo.py 的 init_work)
+    if (
+        hasattr(request.cls, "momo")
+        and hasattr(request.cls.momo, "driver")
+        and hasattr(request.cls.momo.driver, "reset_counters")
+    ):
+        request.cls.momo.driver.reset_counters()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -231,25 +286,7 @@ def setup_suite(request):
         allure.dynamic.sub_suite(func_doc.strip())
 
 
-class ProgressReporter:
-    def __init__(self):
-        self.total_tests = 0
-        self.completed_tests = 0
-
-    def pytest_collection_finish(self, session):
-        self.total_tests = len(session.items)
-
-    def pytest_runtest_teardown(self, item, nextitem):
-        self.completed_tests += 1
-        if self.total_tests > 0:
-            progress = int((self.completed_tests / self.total_tests) * 100)
-            print(f"\nPROGRESS:{progress}", flush=True)
-
-
 def pytest_configure(config):
-    if not config.pluginmanager.hasplugin("progress_reporter"):
-        config.pluginmanager.register(ProgressReporter(), "progress_reporter")
-
     # 註冊自訂的 marker，避免 pytest 報警
     config.addinivalue_line(
         "markers", "tag(name, order=None): 用於標記測試案例並可選地提供執行順序"

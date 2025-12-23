@@ -26,7 +26,7 @@ class PcHome:
         self.page.locator('//input[@type="search"]').fill(keyword)
         self.page.locator('//button[@data-regression="header_search_button"]').click()
         self.page.wait_for_load_state("load")
-        self.page.cp_screenshot_and_attach(img_name=f"搜尋[{keyword}]")
+        self.page.cm_screenshot_and_attach(img_name=f"搜尋[{keyword}]")
 
     def click_product(self, product_index: str):
         """點擊產品
@@ -40,4 +40,4 @@ class PcHome:
         product_name = self.page.locator(
             '//div[@class="o-prodMainName o-prodMainName--prodNick"]'
         ).text_content()
-        self.page.cp_screenshot_and_attach(img_name=f"{product_name}")
+        self.page.cm_screenshot_and_attach(img_name=f"{product_name}")

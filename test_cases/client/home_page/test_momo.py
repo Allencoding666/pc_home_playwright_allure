@@ -3,9 +3,9 @@ import pytest
 from playwright.sync_api import expect
 
 from helper import get_test_data
-from pages.client.momo import Momo
+from pages.client.home_page.web_momo import Momo
 
-MOMO_DATA = get_test_data(test_platform="client", file_name="momo")
+MOMO_DATA = get_test_data(file_path="test_data\client\home_page\momo.yaml")
 HOME_PAGE_DATA = MOMO_DATA["home_page"]
 SEARCH_PRODUCT_DATA = MOMO_DATA["search_product"]
 FAIL_HOME_PAGE_DATA = MOMO_DATA["fail_home_page"]
@@ -34,7 +34,7 @@ class TestMomo:
 
         self.momo.go_to_home_page()
         self.momo.close_pop_up()
-        self.momo.page.cp_screenshot_and_attach(img_name="momo首頁")
+        self.momo.page.cm_screenshot_and_attach(img_name="momo首頁")
         expect(self.momo.page).to_have_title(
             data["test_info"]["verify"]["home_page_title"]
         )
@@ -72,7 +72,7 @@ class TestMomo:
 
         self.momo.go_to_home_page()
         self.momo.close_pop_up()
-        self.momo.page.cp_screenshot_and_attach(img_name="[FAIL_DEMO]momo首頁")
+        self.momo.page.cm_screenshot_and_attach(img_name="[FAIL_DEMO]momo首頁")
         expect(self.momo.page).to_have_title(
             data["test_info"]["verify"]["home_page_title"]
         )
